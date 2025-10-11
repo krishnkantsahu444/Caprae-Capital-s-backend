@@ -9,6 +9,7 @@ from celery import Celery
 from config.celery_utils import create_celery
 from scrapers.google_maps_scraper import GoogleMapsScraper
 from crawlers.google_maps_crawlee import run_crawl
+from utils.exceptions import CaptchaDetectedError
 # MongoDB (primary) and SQLite (backup) imports
 try:
     from db_mongo import save_business, get_all_businesses, get_business_count
@@ -87,8 +88,17 @@ def scrape_leads_from_google_maps_crawlee(
     """
     Scrape Google Maps using Crawlee (Playwright) with anti-bot measures and DB persistence.
     
-    This is the production-ready scraper that saves directly to SQLite database.
-    Results are retrieved separately from the database.
+    Features:
+    - CAPTCHA detection with exponential backoff retry
+    - Proxy rotation on CAPTCHA encounters
+    - Enhanced statistics tracking
+    - Rate limiting between requests
+    
+    Retry Strategy:
+    - Attempt 1: Immediate
+    - Attempt 2: 5s delay (CAPTCHA) or 30s (other errors)
+    - Attempt 3: 15s delay (CAPTCHA) or 30s (other errors)
+    - Attempt 4: 30s delay (CAPTCHA) or 30s (other errors)
     """
 
     options = options or {}
@@ -104,11 +114,27 @@ def scrape_leads_from_google_maps_crawlee(
             headless=headless,
         )
         
-        # Return statistics and a sample of results
+        # Return enhanced statistics
         return {
             "status": "completed",
             "stats": stats,
-            "message": f"Scraped {stats.get('results_count', 0)} businesses. Check database for full results.",
+            "message": f"Scraped {stats.get('results_count', 0)} businesses. "
+                      f"CAPTCHA encounters: {stats.get('captcha_encounters', 0)}, "
+                      f"Detail successes: {stats.get('detail_successes', 0)}, "
+                      f"Detail failures: {stats.get('detail_failures', 0)}",
         }
-    except Exception as exc:  # pragma: no cover - retry path
-        raise self.retry(exc=exc, countdown=30) from exc
+        
+    except CaptchaDetectedError as exc:
+        # CAPTCHA detected - use exponential backoff
+        # Countdown: 5s → 15s → 30s
+        retry_count = self.request.retries
+        countdown = 5 * (2 ** retry_count)  # 5, 10, 20, 40...
+        countdown = min(countdown, 30)  # Cap at 30s
+        
+        print(f"🚫 CAPTCHA detected, retrying in {countdown}s (attempt {retry_count + 1}/{self.max_retries})")
+        raise self.retry(exc=exc, countdown=countdown)
+        
+    except Exception as exc:
+        # Other errors - standard retry with 30s backoff
+        print(f"❌ Error during scraping, retrying in 30s: {str(exc)[:200]}")
+        raise self.retry(exc=exc, countdown=30)

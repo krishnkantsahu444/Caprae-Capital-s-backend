@@ -1,4 +1,5 @@
 """Anti-bot utilities including proxy rotation, user agent rotation, and delay helpers."""
+import asyncio
 import random
 from pathlib import Path
 from typing import List, Optional
@@ -57,3 +58,28 @@ DEFAULT_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
+
+
+class RateLimiter:
+    """Configurable rate limiter to prevent IP bans and throttle requests."""
+    
+    def __init__(self, min_delay_ms: int = 1500, max_delay_ms: int = 4000):
+        """
+        Initialize rate limiter with configurable delays.
+        
+        Args:
+            min_delay_ms: Minimum delay in milliseconds between requests.
+            max_delay_ms: Maximum delay in milliseconds between requests.
+        """
+        self.min_delay = min_delay_ms / 1000
+        self.max_delay = max_delay_ms / 1000
+    
+    async def wait(self):
+        """Wait for a random delay between min and max delay."""
+        delay = random.uniform(self.min_delay, self.max_delay)
+        await asyncio.sleep(delay)
+    
+    def get_delay_ms(self) -> int:
+        """Get the current delay in milliseconds as an integer."""
+        return int(random.uniform(self.min_delay * 1000, self.max_delay * 1000))
+
