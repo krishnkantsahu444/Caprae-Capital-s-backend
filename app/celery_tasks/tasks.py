@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import random
 import time
 from typing import List, Optional
@@ -8,7 +7,6 @@ from typing import List, Optional
 from celery import Celery
 
 from config.celery_utils import create_celery
-from scrapers.apollo_scraper import ApolloScraper
 from scrapers.google_maps_scraper import GoogleMapsScraper
 
 celery_app: Celery = create_celery()
@@ -36,27 +34,6 @@ def scrape_leads(self, query: str) -> List[dict]:
         ]
     except Exception as exc:  # pragma: no cover - retry path
         raise self.retry(exc=exc, countdown=5) from exc
-
-
-@celery_app.task(bind=True, name="scrape_leads_from_apollo", max_retries=3, soft_time_limit=600)
-def scrape_leads_from_apollo(self, query: str) -> List[dict]:
-    """Scrape Apollo for companies and contacts that match the provided query."""
-
-    credentials = {
-        "api_key": os.getenv("APOLLO_API_KEY"),
-        "email": os.getenv("APOLLO_EMAIL"),
-        "password": os.getenv("APOLLO_PASSWORD"),
-        "saved_list_url": os.getenv("APOLLO_SAVED_LIST_URL"),
-        "base_url": os.getenv("APOLLO_BASE_URL", "https://api.apollo.io/v1"),
-    }
-
-    try:
-        with ApolloScraper(**credentials) as scraper:
-            scraper.authenticate()
-            leads = scraper.scrape(query)
-        return leads
-    except Exception as exc:  # pragma: no cover - retry path
-        raise self.retry(exc=exc, countdown=15) from exc
 
 
 @celery_app.task(
