@@ -2,6 +2,34 @@
 from bs4 import BeautifulSoup
 import re
 from typing import List, Dict, Optional
+from utils.config import PHONE_NORMALIZE_REGEX
+
+
+def normalize_phone(phone_str: Optional[str]) -> Optional[str]:
+    """
+    Normalize phone number by removing non-digit characters (except +).
+    
+    Args:
+        phone_str: Raw phone number string.
+    
+    Returns:
+        Normalized phone string, or None if invalid.
+    """
+    if not phone_str:
+        return None
+    
+    # Remove all characters except digits and +
+    normalized = re.sub(PHONE_NORMALIZE_REGEX, "", phone_str)
+    
+    # Replace leading 00 with +
+    if normalized.startswith("00"):
+        normalized = "+" + normalized[2:]
+    
+    # Validate length (between 6 and 15 digits is reasonable for international)
+    if len(normalized) < 6 or len(normalized) > 15:
+        return None
+    
+    return normalized
 
 
 def safe_text(element) -> Optional[str]:
@@ -186,50 +214,177 @@ def parse_card_html(html: str) -> List[Dict]:
     return results
 
 
-def parse_detail_page(html: str) -> Dict:
+def parse_detail_page_html(html: str) -> Dict:
     """
-    Parse Google Maps business detail page to extract additional information.
-
+    Parse Google Maps business detail page to extract comprehensive information.
+    Uses multiple fallback selectors for robustness against HTML changes.
+    
     Args:
         html: Raw HTML content from business detail page.
-
+    
     Returns:
-        Dictionary with website, hours, and other enriched data.
+        Dictionary with website, phone, hours, category, services, and other enriched data.
     """
     soup = BeautifulSoup(html, "lxml")
     data = {}
-
-    # Extract website
+    
+    # ==================== WEBSITE EXTRACTION ====================
+    # Priority 1: Website button/link with data attribute
     website_selectors = [
-        "a[data-item-id='authority']",  # Website link with data attribute
-        "a[href^='http'][aria-label*='Website']",  # Website with aria-label
-        "a.CsEnBe[href^='http']",  # Website link class
+        "a[data-item-id='authority']",                # Official website link
+        "a[aria-label*='Website'][href^='http']",     # Website with aria-label
+        "a[data-tooltip='Open website'][href^='http']",  # Tooltip-based
+        "a.CsEnBe[href^='http']",                     # Website link class
+        "button[data-item-id*='authority'] + a",      # Adjacent to website button
     ]
+    
     for sel in website_selectors:
-        web_el = soup.select_one(sel)
-        if web_el and web_el.get('href'):
-            href = web_el.get('href')
-            # Filter out Google URLs
-            if 'google.com' not in href:
-                data['website'] = href
-                break
-
-    # Extract hours
-    hours_el = soup.select_one("div[aria-label*='Hours']")
-    if hours_el:
-        data['hours'] = safe_text(hours_el)
-
-    # Extract phone (more reliable on detail page)
+        try:
+            web_el = soup.select_one(sel)
+            if web_el and web_el.get('href'):
+                href = web_el.get('href')
+                # Filter out Google URLs and maps URLs
+                if isinstance(href, str) and 'google.com' not in href and 'maps' not in href:
+                    data['website'] = href
+                    break
+        except Exception:
+            continue
+    
+    # Fallback: Look for any external HTTP link in business info section
+    if not data.get('website'):
+        try:
+            info_section = soup.select_one("div.m6QErb, div[role='main']")
+            if info_section:
+                links = info_section.find_all('a', href=re.compile(r'^https?://(?!.*google\.com)(?!.*maps)'))
+                if links:
+                    data['website'] = links[0].get('href')
+        except Exception:
+            pass
+    
+    # ==================== PHONE EXTRACTION ====================
+    # Priority 1: Phone button with data attribute
     phone_selectors = [
-        "button[data-item-id*='phone']",
-        "a[href^='tel:']",
+        "button[data-item-id*='phone']",              # Phone button
+        "a[href^='tel:']",                             # Tel: link
+        "button[data-tooltip*='phone' i]",            # Tooltip with "phone"
+        "div[data-section-id='pn0'] button",          # Phone section button
+        "span[data-tooltip*='Call']",                 # Call tooltip
     ]
+    
+    phones = []
     for sel in phone_selectors:
-        phone_el = soup.select_one(sel)
-        if phone_el:
-            phone_text = safe_text(phone_el)
-            if phone_text:
-                data['phone'] = phone_text
-                break
-
+        try:
+            phone_els = soup.select(sel)
+            for phone_el in phone_els:
+                # Try aria-label first (often contains full number)
+                phone_text = phone_el.get('aria-label')
+                if not phone_text:
+                    phone_text = safe_text(phone_el)
+                
+                if phone_text:
+                    normalized = normalize_phone(phone_text)
+                    if normalized and normalized not in phones:
+                        phones.append(normalized)
+        except Exception:
+            continue
+    
+    # Store phone(s) - join multiple with | separator
+    if phones:
+        data['phone'] = '|'.join(phones) if len(phones) > 1 else phones[0]
+    
+    # ==================== HOURS EXTRACTION ====================
+    hours_selectors = [
+        "div[aria-label*='Hours' i]",                 # Hours div with aria-label
+        "table[aria-label*='Hours' i]",               # Hours table
+        "div[data-section-id='oh'] div.t39EBf",      # Hours section
+        "button[data-item-id='olh'] + div",           # Adjacent to hours button
+    ]
+    
+    for sel in hours_selectors:
+        try:
+            hours_el = soup.select_one(sel)
+            if hours_el:
+                hours_text = safe_text(hours_el)
+                if hours_text and len(hours_text) > 5:  # Reasonable length check
+                    data['hours'] = hours_text
+                    break
+        except Exception:
+            continue
+    
+    # ==================== CATEGORY EXTRACTION ====================
+    # More reliable on detail page than search results
+    category_selectors = [
+        "button[jsaction*='category']",               # Category button
+        "div.LBgpqf button",                          # Category in header
+        "span[jstcache*='3']",                        # Category span (legacy)
+        "button[data-tooltip*='Categories']",         # Categories tooltip
+    ]
+    
+    for sel in category_selectors:
+        try:
+            cat_el = soup.select_one(sel)
+            if cat_el:
+                category = safe_text(cat_el)
+                if category and len(category) > 2:
+                    data['category'] = category
+                    break
+        except Exception:
+            continue
+    
+    # ==================== SERVICES/AMENITIES EXTRACTION ====================
+    services = []
+    try:
+        # Services are often in accessibility features or amenities sections
+        service_sections = soup.select("div[aria-label*='Service options' i], div[aria-label*='Amenities' i]")
+        for section in service_sections:
+            service_els = section.select("span.ZDu9vd, div[role='img'][aria-label]")
+            for svc in service_els:
+                svc_text = svc.get('aria-label') or safe_text(svc)
+                if svc_text and svc_text not in services:
+                    services.append(svc_text)
+    except Exception:
+        pass
+    
+    if services:
+        data['services'] = services  # Store as list
+    
+    # ==================== SOCIAL LINKS EXTRACTION ====================
+    social_links = {}
+    try:
+        social_patterns = {
+            'facebook': r'facebook\.com',
+            'twitter': r'twitter\.com|x\.com',
+            'instagram': r'instagram\.com',
+            'linkedin': r'linkedin\.com',
+        }
+        
+        for platform, pattern in social_patterns.items():
+            link = soup.find('a', href=re.compile(pattern))
+            if link and link.get('href'):
+                social_links[platform] = link.get('href')
+    except Exception:
+        pass
+    
+    if social_links:
+        data['social_links'] = social_links
+    
+    # ==================== ADDITIONAL METADATA ====================
+    # Extract price level (if present)
+    try:
+        price_el = soup.select_one("span[aria-label*='Price' i]")
+        if price_el:
+            price_text = safe_text(price_el)
+            if price_text:
+                data['price_level'] = price_text
+    except Exception:
+        pass
+    
     return data
+
+
+def parse_detail_page(html: str) -> Dict:
+    """
+    Legacy wrapper for backward compatibility.
+    Calls parse_detail_page_html with the same signature.
+    """
+    return parse_detail_page_html(html)

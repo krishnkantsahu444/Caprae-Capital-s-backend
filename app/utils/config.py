@@ -27,6 +27,18 @@ MAX_REQUESTS_PER_CRAWL = int(os.getenv("MAX_REQUESTS_PER_CRAWL", "20"))
 MIN_DELAY_MS = int(os.getenv("MIN_DELAY_MS", "1000"))
 MAX_DELAY_MS = int(os.getenv("MAX_DELAY_MS", "3500"))
 
+# Detail page scraping configuration
+DETAIL_PAGE_TIMEOUT = int(os.getenv("DETAIL_PAGE_TIMEOUT", "20000"))
+MAX_DETAIL_ATTEMPTS = int(os.getenv("MAX_DETAIL_ATTEMPTS", "3"))
+DETAIL_PAGE_DELAY_MS_MIN = int(os.getenv("DETAIL_PAGE_DELAY_MS_MIN", "1500"))
+DETAIL_PAGE_DELAY_MS_MAX = int(os.getenv("DETAIL_PAGE_DELAY_MS_MAX", "3500"))
+
+# Phone normalization (regex pattern to remove non-digits except +)
+PHONE_NORMALIZE_REGEX = os.getenv("PHONE_NORMALIZE_REGEX", "[^0-9+]")
+
+# Database behavior
+DB_UPSERT_ON_INSERT = os.getenv("DB_UPSERT_ON_INSERT", "true").lower() == "true"
+
 
 def get_project_root():
     """Return the absolute path to the project root."""
