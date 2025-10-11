@@ -1,10 +1,11 @@
 """MongoDB database layer for lead persistence with deduplication."""
 import logging
 from typing import Dict, List, Optional
+from datetime import datetime
 from pymongo import MongoClient, ASCENDING, errors
 from pymongo.collection import Collection
 from pymongo.database import Database
-from utils.config import MONGO_URI, MONGO_DB_NAME, MONGO_COLLECTION
+from utils.config import MONGO_URI, MONGO_DB_NAME, MONGO_COLLECTION, DB_UPSERT_ON_INSERT
 
 logger = logging.getLogger(__name__)
 
@@ -96,49 +97,88 @@ def create_indexes():
         logger.warning(f"Error creating indexes (may already exist): {e}")
 
 
-def save_business(business: Dict) -> bool:
+def is_record_complete(business: Dict) -> bool:
     """
-    Save a business to MongoDB with deduplication.
-    
-    Uses upsert to handle duplicates gracefully - updates existing or inserts new.
+    Check if a business record has complete data (phone and website).
     
     Args:
-        business: Dictionary with business data. Must include 'google_maps_url' for deduplication.
+        business: Dictionary with business data.
     
     Returns:
-        True if inserted (new), False if updated (duplicate).
+        True if both phone and website are present and non-empty, False otherwise.
+    """
+    phone = business.get("phone")
+    website = business.get("website")
+    
+    # Check phone is present and looks valid (at least 6 characters)
+    has_valid_phone = phone and isinstance(phone, str) and len(phone) >= 6
+    
+    # Check website is present and looks valid (starts with http)
+    has_valid_website = website and isinstance(website, str) and website.startswith("http")
+    
+    return has_valid_phone and has_valid_website
+
+
+def save_business(business: Dict) -> bool:
+    """
+    Save a business to MongoDB with atomic upsert for deduplication.
+    
+    Uses update_one with upsert=True to atomically handle duplicates.
+    Key priority: google_maps_url > phone (if no URL).
+    Sets created_at only on insert, always updates scraped fields.
+    
+    Args:
+        business: Dictionary with business data.
+    
+    Returns:
+        True if inserted (new), False if updated (duplicate) or error.
     """
     collection = get_collection()
     
-    if not business.get("google_maps_url"):
-        logger.warning("Business missing google_maps_url, cannot save")
+    # Determine unique key for upsert
+    if business.get("google_maps_url"):
+        unique_key = {"google_maps_url": business["google_maps_url"]}
+        key_desc = f"google_maps_url={business['google_maps_url']}"
+    elif business.get("phone"):
+        unique_key = {"phone": business["phone"]}
+        key_desc = f"phone={business['phone']}"
+    else:
+        logger.warning(f"Business missing both google_maps_url and phone, cannot save: {business.get('name')}")
         return False
     
     try:
-        # Add timestamp if not present
-        if "created_at" not in business:
-            from datetime import datetime
-            business["created_at"] = datetime.utcnow()
+        # Prepare update operation
+        now = datetime.utcnow()
         
-        # Use update_one with upsert to handle duplicates
+        # Use $set for all fields (will update existing or set on insert)
+        # Use $setOnInsert for created_at (only set on first insert)
+        update_op = {
+            "$set": business,
+            "$setOnInsert": {"created_at": now}
+        }
+        
+        # Execute atomic upsert
         result = collection.update_one(
-            {"google_maps_url": business["google_maps_url"]},
-            {"$set": business},
-            upsert=True
+            unique_key,
+            update_op,
+            upsert=True if DB_UPSERT_ON_INSERT else False
         )
         
         if result.upserted_id:
-            logger.info(f"Inserted new business: {business.get('name')}")
+            logger.info(f"✅ Inserted new business: {business.get('name')} | {key_desc} | _id={result.upserted_id}")
             return True
+        elif result.modified_count > 0:
+            logger.info(f"🔄 Updated existing business: {business.get('name')} | {key_desc}")
+            return False
         else:
-            logger.info(f"Updated existing business: {business.get('name')}")
+            logger.debug(f"ℹ️  No changes for business: {business.get('name')} | {key_desc}")
             return False
             
     except errors.DuplicateKeyError:
-        logger.info(f"Duplicate business (ignored): {business.get('name')}")
+        logger.info(f"⚠️  Duplicate business (race condition): {business.get('name')} | {key_desc}")
         return False
     except errors.PyMongoError as e:
-        logger.error(f"Error saving business: {e}")
+        logger.error(f"❌ Error saving business: {business.get('name')} | {key_desc} | Error: {e}")
         return False
 
 
