@@ -4,20 +4,22 @@ Async MongoDB connector using Motor for FastAPI endpoints.
 This coexists with db_mongo.py (sync pymongo) used by Celery tasks.
 """
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
-from typing import Optional
+from __future__ import annotations
+from typing import Optional, Any
 import logging
+
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from app.utils.config import MONGO_URI, MONGO_DB_NAME, MONGO_COLLECTION
 
 logger = logging.getLogger(__name__)
 
 # Global Motor client (async)
-client: Optional[AsyncIOMotorClient] = None
-db = None
-collection: Optional[AsyncIOMotorCollection] = None
+client: Any = None
+db: Any = None
+collection: Any = None
 
 
-def init_motor() -> AsyncIOMotorCollection:
+def init_motor() -> Any:
     """
     Initialize Motor (async MongoDB client) for FastAPI.
     Creates indexes idempotently.
@@ -71,7 +73,7 @@ async def create_indexes_async():
         logger.warning(f"Index creation warning (may already exist): {e}")
 
 
-def get_collection() -> AsyncIOMotorCollection:
+def get_collection() -> Any:
     """
     Get the Motor collection instance.
     Initializes if not already done.
