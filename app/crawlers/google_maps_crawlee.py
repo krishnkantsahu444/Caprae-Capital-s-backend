@@ -9,6 +9,7 @@ from crawlee.playwright_crawler import PlaywrightCrawler, PlaywrightCrawlingCont
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from parsers import parse_card_html, parse_detail_page_html, normalize_phone
+from utils.exceptions import CaptchaDetectedError, DetailPageEnrichmentError
 # MongoDB (primary) and SQLite (backup) imports
 try:
     from db_mongo import save_business, business_exists, is_record_complete
@@ -19,7 +20,7 @@ except ImportError:
         return bool(business.get("phone") and business.get("website"))
     print("Warning: MongoDB not available, using SQLite")
 
-from utils.anti_bot import Rotation, load_lines, DEFAULT_USER_AGENTS
+from utils.anti_bot import Rotation, load_lines, DEFAULT_USER_AGENTS, RateLimiter
 from utils.config import (
     PROXY_LIST_PATH,
     USER_AGENTS_PATH,
@@ -54,6 +55,15 @@ class GoogleMapsCrawlee:
         self.headless = headless
         self.use_proxies = use_proxies
         self.results_count = 0
+        
+        # Statistics tracking
+        self.stats = {
+            "total_attempted": 0,
+            "total_successful": 0,
+            "captcha_encounters": 0,
+            "detail_failures": 0,
+            "detail_successes": 0,
+        }
 
         # Load proxies and user agents
         proxies = []
@@ -65,6 +75,13 @@ class GoogleMapsCrawlee:
         user_agents = load_lines(str(ua_path)) or DEFAULT_USER_AGENTS
 
         self.rotation = Rotation(proxies=proxies, user_agents=user_agents)
+        
+        # Initialize rate limiter with configurable delays
+        # Can be overridden via environment variables
+        self.rate_limiter = RateLimiter(
+            min_delay_ms=MIN_DELAY_MS,
+            max_delay_ms=MAX_DELAY_MS
+        )
 
     def build_search_url(self) -> str:
         """Build Google Maps search URL from query and location."""
@@ -72,23 +89,63 @@ class GoogleMapsCrawlee:
         encoded = quote_plus(search_term)
         return f"https://www.google.com/maps/search/{encoded}"
 
-    async def check_for_blocking(self, page: Page) -> bool:
-        """Check if the page shows blocking/CAPTCHA."""
-        content = await page.content()
-        content_lower = content.lower()
-
-        blocking_indicators = [
-            "unusual traffic",
-            "captcha",
-            "sorry",
-            "automated requests",
-            "verify you're not a robot",
-        ]
-
-        for indicator in blocking_indicators:
-            if indicator in content_lower:
+    async def is_captcha_present(self, page: Page) -> bool:
+        """
+        Enhanced CAPTCHA detection with multiple indicators.
+        
+        Detects common Google CAPTCHA indicators including:
+        - reCAPTCHA iframe
+        - CAPTCHA redirect forms
+        - Blocking message text
+        - Unusual traffic warnings
+        
+        Returns:
+            True if CAPTCHA is detected, False otherwise.
+        """
+        try:
+            # Check for reCAPTCHA iframe
+            captcha_iframe = await page.query_selector("iframe[src*='recaptcha'], iframe[src*='captcha']")
+            if captcha_iframe:
+                logger.warning("🚫 Detected reCAPTCHA iframe")
                 return True
-        return False
+            
+            # Check for CAPTCHA redirect form
+            captcha_form = await page.query_selector("form[action*='CaptchaRedirect'], form[action*='captcha']")
+            if captcha_form:
+                logger.warning("🚫 Detected CAPTCHA redirect form")
+                return True
+            
+            # Check page content for blocking indicators
+            content = await page.content()
+            content_lower = content.lower()
+            
+            blocking_indicators = [
+                "unusual traffic",
+                "captcha",
+                "sorry",
+                "automated requests",
+                "verify you're not a robot",
+                "our systems have detected",
+                "please verify",
+            ]
+            
+            for indicator in blocking_indicators:
+                if indicator in content_lower:
+                    logger.warning(f"🚫 Detected blocking indicator: '{indicator}'")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking for CAPTCHA: {e}")
+            return False
+
+    async def check_for_blocking(self, page: Page) -> bool:
+        """
+        Legacy method for backward compatibility.
+        Delegates to is_captcha_present.
+        """
+        return await self.is_captcha_present(page)
 
     async def scroll_results_panel(self, page: Page, max_scrolls: int = 10):
         """Scroll the results panel to load lazy-loaded content."""
@@ -133,7 +190,14 @@ class GoogleMapsCrawlee:
 
     async def visit_detail_page_and_enrich(self, context_page: Page, business: Dict) -> bool:
         """
-        Visit business detail page with retry logic, proxy rotation, and robust error handling.
+        Visit business detail page with enhanced retry logic, CAPTCHA detection, and proxy rotation.
+        
+        Features:
+        - Exponential backoff on failures (2s → 4s → 6s)
+        - Proxy rotation on each retry
+        - User agent rotation
+        - CAPTCHA detection with proper error raising
+        - Atomic save to MongoDB after enrichment
         
         Args:
             context_page: Main page context (used to create new tab).
@@ -148,13 +212,13 @@ class GoogleMapsCrawlee:
             return False
         
         business_name = business.get("name", "Unknown")
+        self.stats["total_attempted"] += 1
         
-        # Throttle before attempting detail visit
-        delay_ms = self.rotation.random_delay_ms(DETAIL_PAGE_DELAY_MS_MIN, DETAIL_PAGE_DELAY_MS_MAX)
-        logger.info(f"🕒 Waiting {delay_ms}ms before visiting detail page for: {business_name}")
-        await context_page.wait_for_timeout(delay_ms)
+        # Throttle before attempting detail visit using rate limiter
+        await self.rate_limiter.wait()
+        logger.info(f"🕒 Rate limited before visiting detail page for: {business_name}")
         
-        # Retry loop with proxy rotation
+        # Retry loop with exponential backoff and proxy rotation
         for attempt in range(1, MAX_DETAIL_ATTEMPTS + 1):
             new_page = None
             try:
@@ -165,11 +229,19 @@ class GoogleMapsCrawlee:
                 
                 # Rotate user agent
                 user_agent = self.rotation.next_user_agent()
-                await new_page.set_user_agent(user_agent)
-                logger.debug(f"Set user agent: {user_agent[:50]}...")
+                if user_agent:
+                    await new_page.set_extra_http_headers({"User-Agent": user_agent})
+                    logger.debug(f"Set user agent: {user_agent[:50]}...")
                 
                 # Navigate to detail page
                 await new_page.goto(url, timeout=DETAIL_PAGE_TIMEOUT, wait_until="domcontentloaded")
+                
+                # Check for CAPTCHA BEFORE processing
+                if await self.is_captcha_present(new_page):
+                    self.stats["captcha_encounters"] += 1
+                    logger.warning(f"🚫 CAPTCHA detected on attempt {attempt} for {business_name}")
+                    await new_page.close()
+                    raise CaptchaDetectedError(f"CAPTCHA detected for {business_name}")
                 
                 # Wait for detail page content with multiple selector fallbacks
                 detail_selectors = [
@@ -194,10 +266,6 @@ class GoogleMapsCrawlee:
                 if not selector_found:
                     logger.warning(f"⚠️  No expected selectors found on detail page for: {business_name}")
                 
-                # Check for blocking indicators
-                if await self.check_for_blocking(new_page):
-                    raise Exception("Detected CAPTCHA or blocking page")
-                
                 # Additional wait for dynamic content
                 await new_page.wait_for_timeout(random.randint(1000, 2000))
                 
@@ -216,11 +284,20 @@ class GoogleMapsCrawlee:
                 # Merge enriched data into business dict
                 business.update(detail_data)
                 
+                # Atomic save to MongoDB after enrichment
+                save_business(business)
+                
                 logger.info(f"✅ Successfully enriched: {business_name} | Website: {detail_data.get('website', 'N/A')} | Phone: {detail_data.get('phone', 'N/A')}")
                 
-                # Close tab and return success
+                # Close tab and update stats
                 await new_page.close()
+                self.stats["detail_successes"] += 1
+                self.stats["total_successful"] += 1
                 return True
+                
+            except CaptchaDetectedError as e:
+                logger.warning(f"🚫 CAPTCHA on attempt {attempt} for {business_name}: {str(e)}")
+                # Will retry with new proxy
                 
             except PlaywrightTimeout as e:
                 logger.warning(f"⏱️  Timeout on attempt {attempt} for {business_name}: {str(e)[:100]}")
@@ -236,18 +313,19 @@ class GoogleMapsCrawlee:
                     except Exception:
                         pass
             
-            # If not last attempt, rotate proxy and retry
+            # If not last attempt, rotate proxy and apply exponential backoff
             if attempt < MAX_DETAIL_ATTEMPTS:
                 proxy = self.rotation.next_proxy()
                 if proxy:
                     logger.info(f"🔄 Rotating proxy for retry: {proxy[:30]}...")
                 
-                # Exponential backoff before retry
-                backoff_ms = min(2000 * attempt, 5000)
-                logger.info(f"⏳ Backing off {backoff_ms}ms before retry...")
+                # Exponential backoff: 2s → 4s → 6s
+                backoff_ms = 2000 * attempt
+                logger.info(f"⏳ Exponential backoff {backoff_ms}ms before retry...")
                 await context_page.wait_for_timeout(backoff_ms)
         
         # All attempts failed
+        self.stats["detail_failures"] += 1
         logger.error(f"❌ Failed to enrich detail page after {MAX_DETAIL_ATTEMPTS} attempts: {business_name}")
         return False
 
@@ -259,12 +337,14 @@ class GoogleMapsCrawlee:
         await self.visit_detail_page_and_enrich(page, business)
 
     async def handle_page(self, context: PlaywrightCrawlingContext):
-        """Handle each page crawled by Crawlee."""
+        """Handle each page crawled by Crawlee with CAPTCHA detection and rate limiting."""
         page = context.page
 
-        # Check for blocking
-        if await self.check_for_blocking(page):
-            raise Exception("Blocked by Google - CAPTCHA or unusual traffic detected")
+        # Check for CAPTCHA/blocking BEFORE processing
+        if await self.is_captcha_present(page):
+            self.stats["captcha_encounters"] += 1
+            logger.error("🚫 CAPTCHA detected on search results page")
+            raise CaptchaDetectedError("Blocked by Google - CAPTCHA or unusual traffic detected")
 
         # Wait for results to load
         try:
@@ -301,7 +381,7 @@ class GoogleMapsCrawlee:
             if is_record_complete(business):
                 logger.info(f"✨ Already complete from search results: {business_name} | Skipping detail visit")
             else:
-                # Enrich with detail page if URL exists
+                # Enrich with detail page if URL exists (with retry logic)
                 if google_maps_url:
                     enriched = await self.visit_detail_page_and_enrich(page, business)
                     if not enriched:
@@ -318,9 +398,9 @@ class GoogleMapsCrawlee:
             else:
                 logger.debug(f"🔄 Updated existing: {business_name}")
 
-            # Random delay between businesses
-            delay_ms = self.rotation.random_delay_ms(MIN_DELAY_MS, MAX_DELAY_MS)
-            await page.wait_for_timeout(delay_ms)
+            # Apply rate limiting between businesses
+            await self.rate_limiter.wait()
+            logger.debug(f"⏱️  Rate limited after processing {business_name}")
 
     async def handle_failed_request(self, context: PlaywrightCrawlingContext, error: Exception):
         """Handle failed requests with logging."""
@@ -328,7 +408,7 @@ class GoogleMapsCrawlee:
         # Could implement retry logic with proxy rotation here if needed
 
     async def run_async(self) -> Dict:
-        """Run the crawler asynchronously and return results."""
+        """Run the crawler asynchronously and return enhanced statistics."""
         start_url = self.build_search_url()
 
         # Build launch options
@@ -357,27 +437,32 @@ class GoogleMapsCrawlee:
         # Create crawler
         crawler = PlaywrightCrawler(
             request_handler=self.handle_page,
-            request_handler_timeout_secs=120,
             max_requests_per_crawl=1,  # Only process the search page
             headless=self.headless,
             browser_type="chromium",
         )
 
-        # Override default context options to add user agent
-        if user_agent:
-            crawler._playwright_crawler_options = crawler._playwright_crawler_options or {}
-            crawler._playwright_crawler_options["browser_context_options"] = {
-                "user_agent": user_agent,
-            }
-
-        # Run the crawler
+        # Run the crawler with error handling
         try:
             await crawler.run([start_url])
+        except CaptchaDetectedError as e:
+            logger.error(f"🚫 Crawler stopped due to CAPTCHA: {e}")
+            self.stats["captcha_encounters"] += 1
         except Exception as e:
-            print(f"Crawler error: {e}")
+            logger.error(f"❌ Crawler error: {e}")
             raise
 
-        return {"results_count": self.results_count, "query": self.query, "location": self.location}
+        # Return enhanced statistics
+        return {
+            "results_count": self.results_count,
+            "query": self.query,
+            "location": self.location,
+            "total_attempted": self.stats["total_attempted"],
+            "total_successful": self.stats["total_successful"],
+            "captcha_encounters": self.stats["captcha_encounters"],
+            "detail_failures": self.stats["detail_failures"],
+            "detail_successes": self.stats["detail_successes"],
+        }
 
     def run(self) -> Dict:
         """Synchronous wrapper for run_async."""
