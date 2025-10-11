@@ -22,7 +22,7 @@ def print_result(test_name: str, success: bool, details: str = ""):
     print()
 
 
-def test_endpoint(name: str, url: str, expected_keys: list = None) -> bool:
+def test_endpoint(name: str, url: str, expected_keys: list | None = None) -> bool:
     """Generic endpoint test"""
     try:
         response = requests.get(url, timeout=10)

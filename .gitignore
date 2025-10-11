@@ -123,3 +123,108 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# ============================================
+# PROJECT-SPECIFIC IGNORES
+# ============================================
+
+# Environment variables (sensitive data)
+.env
+.env.local
+.env.*.local
+*.env
+
+# MongoDB / SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+leads.db
+
+# Proxies and User Agents (sensitive data)
+proxies.txt
+user_agents.txt
+# Keep the examples
+!proxies.txt.example
+!user_agents.txt.example
+
+# Celery
+celerybeat.pid
+
+# Redis dumps
+dump.rdb
+
+# Playwright
+.playwright/
+playwright/.env
+
+# Scraped data / exports
+exports/
+data/
+scraped_data/
+*.csv
+# Keep example CSV files
+!example.csv
+!**/examples/*.csv
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Logs
+*.log
+logs/
+*.out
+
+# Backup files
+*.bak
+*.swp
+*.swo
+*~
+*.tmp
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+
+# Temporary files
+.cache/
+temp/
+tmp/
+scratch/
+
+# FastAPI / Uvicorn
+*.pid
+
+# Windows additional
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Mac additional
+.AppleDouble
+.LSOverride
+
+# Linux additional
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
