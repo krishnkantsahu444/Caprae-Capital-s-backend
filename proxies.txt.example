@@ -1,0 +1,7 @@
+# Proxy List Example
+# Format: http://host:port or host:port
+# Add your proxies below (one per line)
+# Example:
+# http://proxy1.example.com:8080
+# http://proxy2.example.com:8080
+# 192.168.1.100:3128
