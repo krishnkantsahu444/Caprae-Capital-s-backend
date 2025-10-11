@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException
 
 from celery_tasks.tasks import (
     scrape_leads,
-    scrape_leads_from_apollo,
     scrape_leads_from_google_maps,
 )
 from schemas.scraper import (
@@ -32,21 +31,6 @@ def start_scrape(req: LeadRequest) -> TaskStatus:
 @router.get("/task/{task_id}", response_model=TaskStatus)
 def get_task_status(task_id: str) -> TaskStatus:
     """Inspect the state of the generic mock scraping task."""
-
-    return _build_task_status(task_id)
-
-
-@router.post("/apollo/async", response_model=TaskStatus)
-def start_apollo_scrape(req: LeadRequest) -> TaskStatus:
-    """Trigger an Apollo scraping workflow asynchronously."""
-
-    task = scrape_leads_from_apollo.delay(req.query)
-    return TaskStatus(task_id=task.id, status="PENDING", result=None)
-
-
-@router.get("/apollo/task/{task_id}", response_model=TaskStatus)
-def get_apollo_task_status(task_id: str) -> TaskStatus:
-    """Return the status and result payload for an Apollo scraping task."""
 
     return _build_task_status(task_id)
 
