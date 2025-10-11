@@ -1,0 +1,430 @@
+{
+  "info": {
+    "name": "Company Search API",
+    "description": "Complete Postman collection for testing company search endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Companies",
+      "item": [
+        {
+          "name": "List All Companies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?limit=20&offset=0",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Results per page (1-200)"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset"
+                }
+              ]
+            },
+            "description": "Get paginated list of all companies"
+          }
+        },
+        {
+          "name": "Search Companies by Query",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?query=coffee&limit=10",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "coffee",
+                  "description": "Search in business name or category"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Search for coffee shops"
+          }
+        },
+        {
+          "name": "Filter by Location",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?location=Austin&limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "location",
+                  "value": "Austin",
+                  "description": "Filter by location/address"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get businesses in Austin"
+          }
+        },
+        {
+          "name": "Filter by Rating",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?rating_min=4.5&limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "rating_min",
+                  "value": "4.5",
+                  "description": "Minimum rating (0-5)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get high-rated businesses (4.5+)"
+          }
+        },
+        {
+          "name": "Filter by Category",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?category=Restaurant&limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "Restaurant",
+                  "description": "Filter by category"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get restaurants only"
+          }
+        },
+        {
+          "name": "Has Website Filter",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?has_website=true&limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "has_website",
+                  "value": "true",
+                  "description": "Only businesses with website"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get businesses with websites"
+          }
+        },
+        {
+          "name": "Combined Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?query=coffee&location=Austin&rating_min=4.5&has_website=true&sort_by=rating&order=desc&limit=10",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "coffee"
+                },
+                {
+                  "key": "location",
+                  "value": "Austin"
+                },
+                {
+                  "key": "rating_min",
+                  "value": "4.5"
+                },
+                {
+                  "key": "has_website",
+                  "value": "true"
+                },
+                {
+                  "key": "sort_by",
+                  "value": "rating"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "High-rated Austin coffee shops with websites, sorted by rating"
+          }
+        },
+        {
+          "name": "Sort by Rating",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies?sort_by=rating&order=desc&limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies"],
+              "query": [
+                {
+                  "key": "sort_by",
+                  "value": "rating",
+                  "description": "Sort field (rating, review_count, created_at, business_name)"
+                },
+                {
+                  "key": "order",
+                  "value": "desc",
+                  "description": "Sort order (asc or desc)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Get top-rated businesses"
+          }
+        },
+        {
+          "name": "Get Single Company",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/:id",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "650f5b2a2f1c7f9d4c8b4567",
+                  "description": "MongoDB ObjectId (replace with real ID)"
+                }
+              ]
+            },
+            "description": "Get full details of a single company"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Metadata",
+      "item": [
+        {
+          "name": "Get Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/meta/categories?limit=100",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", "meta", "categories"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Max categories to return (1-500)"
+                }
+              ]
+            },
+            "description": "Get distinct categories for autocomplete"
+          }
+        },
+        {
+          "name": "Get Locations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/meta/locations?limit=100",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", "meta", "locations"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Max locations to return (1-500)"
+                }
+              ]
+            },
+            "description": "Get distinct locations for autocomplete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Export",
+      "item": [
+        {
+          "name": "Export All to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/export/csv?limit=1000",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", "export", "csv"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1000",
+                  "description": "Max records to export (1-20000)"
+                }
+              ]
+            },
+            "description": "Export up to 1000 companies to CSV"
+          }
+        },
+        {
+          "name": "Export Filtered to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/export/csv?query=coffee&location=Austin&limit=500",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", "export", "csv"],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "coffee"
+                },
+                {
+                  "key": "location",
+                  "value": "Austin"
+                },
+                {
+                  "key": "limit",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": "Export filtered coffee shops in Austin"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Statistics",
+      "item": [
+        {
+          "name": "Get Database Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:9000/companies/stats/summary",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["companies", "stats", "summary"]
+            },
+            "description": "Get aggregate statistics: total companies, avg rating, etc."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scraping (Existing Endpoints)",
+      "item": [
+        {
+          "name": "Trigger Crawlee Scrape",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"coffee\",\n  \"location\": \"Austin\",\n  \"max_results\": 10,\n  \"headless\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:9000/scrape/crawlee/async",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "9000",
+              "path": ["scrape", "crawlee", "async"]
+            },
+            "description": "Trigger background scrape to populate database"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:9000",
+      "type": "string"
+    }
+  ]
+}
