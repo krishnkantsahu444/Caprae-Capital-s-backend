@@ -82,13 +82,8 @@ def enrich_lead_email_task(self, lead_id: str):
         
         # Update database with enriched emails
         if result['emails']:
-            update_data = {
-                'emails': result['emails'],
-                'email_enriched_at': datetime.utcnow().isoformat(),
-                'enrichment_methods': result['methods_used']
-            }
-            
-            update_business_emails(lead_id, update_data)
+            # Just pass the emails list directly
+            update_business_emails(lead_id, result['emails'])
             
             logger.info(f"✅ Successfully enriched {len(result['emails'])} emails for lead {lead_id}")
             logger.info(f"   Verified: {result['verified_count']}/{result['total_found']}")
@@ -133,10 +128,10 @@ def batch_enrich_emails_task(limit: int = 100):
     logger.info(f"🔄 Starting batch email enrichment (limit={limit})")
     
     # Import here to avoid circular imports
-    from app.db_mongo import get_db
+    from app.db_mongo import get_database
     
     try:
-        db = get_db()
+        db = get_database()
         
         # Find leads with website but no enriched emails
         leads_cursor = db.businesses.find(
@@ -159,7 +154,8 @@ def batch_enrich_emails_task(limit: int = 100):
         for lead in leads:
             try:
                 # Queue enrichment task for each lead
-                enrich_lead_email_task.delay(str(lead['_id']))
+                # Type ignore: Celery's shared_task decorator adds .delay() method
+                enrich_lead_email_task.delay(str(lead['_id']))  # type: ignore
                 queued_count += 1
                 
             except Exception as e:

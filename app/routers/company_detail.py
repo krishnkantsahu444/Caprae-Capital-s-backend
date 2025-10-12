@@ -91,9 +91,14 @@ async def get_score_breakdown(id: str) -> Dict[str, Any]:
         lead_score = business.get("lead_score", {})
         
         if not lead_score or not lead_score.get("total_score"):
-            # If not scored yet, calculate on-the-fly
-            from app.domain.services.lead_scoring import LeadScoringService
-            lead_score = LeadScoringService.calculate_score(business)
+            # If not scored yet, return a message indicating score not calculated
+            return {
+                "company_id": id,
+                "company_name": business.get("name", ""),
+                "lead_score": {
+                    "message": "Lead score not yet calculated. Implement lead scoring service to calculate scores."
+                }
+            }
         
         return {
             "company_id": id,
