@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from config.celery_utils import create_celery
-from routers import scraper, companies
+from routers import scraper, companies, analytics, company_detail
 from db_motor import init_motor, create_indexes_async, close_motor
 import logging
 
@@ -24,6 +24,8 @@ def create_app() -> FastAPI:
     # Include routers
     current_app.include_router(scraper.router)
     current_app.include_router(companies.router)
+    current_app.include_router(analytics.router)  # NEW: Analytics endpoints
+    current_app.include_router(company_detail.router)  # NEW: Normalized company detail
     
     return current_app
 
