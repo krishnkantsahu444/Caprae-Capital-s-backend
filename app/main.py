@@ -8,6 +8,14 @@ from routers import scraper, companies, analytics, company_detail
 from db_motor import init_motor, create_indexes_async, close_motor
 import logging
 
+# Import enrichment router
+try:
+    from app.presentation.api.v1.routes import enrichment
+    ENRICHMENT_AVAILABLE = True
+except ImportError:
+    ENRICHMENT_AVAILABLE = False
+    logging.warning("Email enrichment endpoints not available")
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +34,11 @@ def create_app() -> FastAPI:
     current_app.include_router(companies.router)
     current_app.include_router(analytics.router)  # NEW: Analytics endpoints
     current_app.include_router(company_detail.router)  # NEW: Normalized company detail
+    
+    # Include email enrichment router if available
+    if ENRICHMENT_AVAILABLE:
+        current_app.include_router(enrichment.router, prefix="/api/v1")
+        logger.info("✅ Email enrichment endpoints registered")
     
     return current_app
 
