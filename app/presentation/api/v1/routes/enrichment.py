@@ -93,7 +93,8 @@ async def trigger_email_enrichment(company_id: str):
     
     # Queue enrichment task
     try:
-        task = enrich_lead_email_task.delay(company_id)
+        # Type ignore: Celery's shared_task decorator adds .delay() method
+        task = enrich_lead_email_task.delay(company_id)  # type: ignore
         
         logger.info(f"✅ Queued email enrichment for company {company_id}, task_id: {task.id}")
         
@@ -248,7 +249,8 @@ async def trigger_batch_enrichment(limit: int = 100):
     
     # Queue batch enrichment task
     try:
-        task = batch_enrich_emails_task.delay(limit)
+        # Type ignore: Celery's shared_task decorator adds .delay() method
+        task = batch_enrich_emails_task.delay(limit)  # type: ignore
         
         logger.info(f"✅ Queued batch enrichment for up to {limit} leads, task_id: {task.id}")
         

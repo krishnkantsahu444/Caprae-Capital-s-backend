@@ -254,18 +254,29 @@ class EmailFinder:
             emails = []
             
             # WHOIS data format varies by registrar
-            if hasattr(w, 'emails'):
-                if isinstance(w.emails, list):
-                    emails.extend(w.emails)
-                elif isinstance(w.emails, str):
-                    emails.append(w.emails)
+            # Check if 'emails' exists in the dictionary
+            if isinstance(w, dict) and 'emails' in w:
+                if isinstance(w['emails'], list):
+                    emails.extend(w['emails'])
+                elif isinstance(w['emails'], str):
+                    emails.append(w['emails'])
+            elif hasattr(w, 'emails') and w.emails:  # type: ignore
+                if isinstance(w.emails, list):  # type: ignore
+                    emails.extend(w.emails)  # type: ignore
+                elif isinstance(w.emails, str):  # type: ignore
+                    emails.append(w.emails)  # type: ignore
             
             # Also check registrant_email field
-            if hasattr(w, 'registrant_email') and w.registrant_email:
-                if isinstance(w.registrant_email, list):
-                    emails.extend(w.registrant_email)
-                elif isinstance(w.registrant_email, str):
-                    emails.append(w.registrant_email)
+            if isinstance(w, dict) and 'registrant_email' in w and w['registrant_email']:
+                if isinstance(w['registrant_email'], list):
+                    emails.extend(w['registrant_email'])
+                elif isinstance(w['registrant_email'], str):
+                    emails.append(w['registrant_email'])
+            elif hasattr(w, 'registrant_email') and w.registrant_email:  # type: ignore
+                if isinstance(w.registrant_email, list):  # type: ignore
+                    emails.extend(w.registrant_email)  # type: ignore
+                elif isinstance(w.registrant_email, str):  # type: ignore
+                    emails.append(w.registrant_email)  # type: ignore
             
             # Filter out privacy-protected/redacted emails
             filtered = [

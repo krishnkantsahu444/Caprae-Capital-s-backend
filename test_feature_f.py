@@ -5,7 +5,7 @@ import pytest
 import sys
 sys.path.insert(0, 'app')
 
-from utils.normalization import (
+from app.utils.normalization import (
     add_completeness_flags,
     calculate_enrichment_fields,
     normalize_business_response
@@ -90,7 +90,7 @@ class TestMongoDBIndexes:
     
     def test_indexes_created(self):
         """Test that all required indexes exist."""
-        from db_mongo import get_collection
+        from app.db_mongo import get_collection
         
         collection = get_collection()
         indexes = list(collection.list_indexes())

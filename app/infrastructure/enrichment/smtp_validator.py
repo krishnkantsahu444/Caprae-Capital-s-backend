@@ -72,7 +72,9 @@ class SMTPEmailValidator:
                 
                 result['mx_records'] = True
                 # Get highest priority MX record (lowest number = highest priority)
-                mx_host = str(sorted(mx_records, key=lambda x: x.preference)[0].exchange).rstrip('.')
+                # Type ignore: dnspython Answer object is iterable but type checker doesn't know
+                mx_list = list(mx_records)  # type: ignore
+                mx_host = str(sorted(mx_list, key=lambda x: x.preference)[0].exchange).rstrip('.')
                 
             except dns.resolver.NXDOMAIN:
                 result['error'] = 'domain_not_found'
@@ -170,7 +172,8 @@ class SMTPEmailValidator:
         """
         try:
             mx_records = dns.resolver.resolve(domain, 'MX')
-            return [str(mx.exchange).rstrip('.') for mx in sorted(mx_records, key=lambda x: x.preference)]
+            mx_list = list(mx_records)  # type: ignore
+            return [str(mx.exchange).rstrip('.') for mx in sorted(mx_list, key=lambda x: x.preference)]
         except Exception as e:
             logger.error(f"Error getting MX records for {domain}: {e}")
             return []
