@@ -135,6 +135,47 @@ def create_indexes():
         )
         logger.info("Created index on created_at")
         
+        # NEW INDEXES FOR FEATURE F: Data Quality & Search Optimization
+        
+        # Index on lead_score.total_score for sorting by score
+        collection.create_index(
+            [("lead_score.total_score", ASCENDING)],
+            name="lead_score_idx",
+            sparse=True
+        )
+        logger.info("Created index on lead_score.total_score")
+        
+        # Index on lead_score.tier for filtering by tier (HOT/WARM/COLD/LOW)
+        collection.create_index(
+            [("lead_score.tier", ASCENDING)],
+            name="lead_tier_idx",
+            sparse=True
+        )
+        logger.info("Created index on lead_score.tier")
+        
+        # Compound index for analytics: category + location + lead score
+        collection.create_index(
+            [("category", ASCENDING), ("location", ASCENDING), ("lead_score.total_score", ASCENDING)],
+            name="category_location_score_idx"
+        )
+        logger.info("Created compound index on category + location + lead_score")
+        
+        # Index on completeness_flags.has_phone for filtering complete leads
+        collection.create_index(
+            [("completeness_flags.has_phone", ASCENDING)],
+            name="has_phone_flag_idx",
+            sparse=True
+        )
+        logger.info("Created index on completeness_flags.has_phone")
+        
+        # Index on completeness_flags.has_email for enrichment tracking
+        collection.create_index(
+            [("completeness_flags.has_email", ASCENDING)],
+            name="has_email_flag_idx",
+            sparse=True
+        )
+        logger.info("Created index on completeness_flags.has_email")
+        
     except errors.PyMongoError as e:
         logger.warning(f"Error creating indexes (may already exist): {e}")
 
@@ -498,3 +539,208 @@ try:
 except Exception as e:
     logger.warning(f"Could not initialize MongoDB on import: {e}")
     logger.warning("MongoDB will be initialized on first use")
+
+
+# NEW FUNCTIONS FOR FEATURE F: Data Quality & Search Optimization
+
+def update_business_score(business_id, score_data: Dict) -> bool:
+    """
+    Update business with lead score data.
+    
+    Args:
+        business_id: ObjectId or string ID of business
+        score_data: Dict with lead scoring information
+        
+    Returns:
+        True if updated successfully, False otherwise
+    """
+    collection = get_collection()
+    
+    try:
+        from bson import ObjectId
+        
+        # Convert string to ObjectId if needed
+        if isinstance(business_id, str):
+            business_id = ObjectId(business_id)
+        
+        result = collection.update_one(
+            {"_id": business_id},
+            {"$set": {
+                "lead_score": score_data,
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        if result.modified_count > 0:
+            logger.debug(f"Updated lead score for business {business_id}")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error updating business score: {e}")
+        return False
+
+
+def update_business_emails(business_id, emails: List[Dict]) -> bool:
+    """
+    Update business with enriched email data.
+    
+    Args:
+        business_id: ObjectId or string ID of business
+        emails: List of email dictionaries from enrichment
+        
+    Returns:
+        True if updated successfully, False otherwise
+    """
+    collection = get_collection()
+    
+    try:
+        from bson import ObjectId
+        
+        # Convert string to ObjectId if needed
+        if isinstance(business_id, str):
+            business_id = ObjectId(business_id)
+        
+        # Extract primary email
+        primary_email = emails[0]['email'] if emails else None
+        
+        result = collection.update_one(
+            {"_id": business_id},
+            {"$set": {
+                "email": primary_email,
+                "emails": emails,
+                "email_enriched_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"Updated emails for business {business_id}: {len(emails)} emails")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error updating business emails: {e}")
+        return False
+
+
+def update_completeness_flags(business_id) -> bool:
+    """
+    Update completeness flags for a business based on current data.
+    
+    Args:
+        business_id: ObjectId or string ID of business
+        
+    Returns:
+        True if updated successfully, False otherwise
+    """
+    collection = get_collection()
+    
+    try:
+        from bson import ObjectId
+        
+        # Convert string to ObjectId if needed
+        if isinstance(business_id, str):
+            business_id = ObjectId(business_id)
+        
+        # Get business
+        business = collection.find_one({"_id": business_id})
+        if not business:
+            return False
+        
+        # Calculate flags
+        flags = {
+            "has_phone": bool(business.get("phone")),
+            "has_website": bool(business.get("website")),
+            "has_email": bool(business.get("email")),
+            "has_hours": bool(business.get("hours")),
+            "has_rating": bool(business.get("rating")),
+            "has_reviews": bool(business.get("reviews")),
+            "has_services": bool(business.get("services")),
+        }
+        
+        enrichment_fields = []
+        if not business.get("email"):
+            enrichment_fields.append("email")
+        if not business.get("phone"):
+            enrichment_fields.append("phone")
+        if not business.get("website"):
+            enrichment_fields.append("website")
+        if not business.get("hours"):
+            enrichment_fields.append("hours")
+        
+        result = collection.update_one(
+            {"_id": business_id},
+            {"$set": {
+                "completeness_flags": flags,
+                "enrichment_fields": enrichment_fields,
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"Error updating completeness flags: {e}")
+        return False
+
+
+def search_businesses_by_tier(tier: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    """
+    Search businesses by lead tier with pagination.
+    
+    Args:
+        tier: Lead tier (HOT, WARM, COLD, LOW) or None for all
+        limit: Maximum number of results
+        
+    Returns:
+        List of business dictionaries
+    """
+    collection = get_collection()
+    
+    try:
+        query = {}
+        if tier:
+            query["lead_score.tier"] = tier.upper()
+        
+        cursor = collection.find(query).sort("lead_score.total_score", -1).limit(limit)
+        businesses = list(cursor)
+        
+        # Convert ObjectId to string
+        for business in businesses:
+            if "_id" in business:
+                business["_id"] = str(business["_id"])
+        
+        logger.info(f"Found {len(businesses)} businesses with tier={tier}")
+        return businesses
+    except Exception as e:
+        logger.error(f"Error searching by tier: {e}")
+        return []
+
+
+def get_business_by_id(business_id) -> Optional[Dict]:
+    """
+    Get a single business by ID.
+    
+    Args:
+        business_id: ObjectId or string ID
+        
+    Returns:
+        Business dictionary or None if not found
+    """
+    collection = get_collection()
+    
+    try:
+        from bson import ObjectId
+        
+        # Convert string to ObjectId if needed
+        if isinstance(business_id, str):
+            business_id = ObjectId(business_id)
+        
+        business = collection.find_one({"_id": business_id})
+        
+        if business and "_id" in business:
+            business["_id"] = str(business["_id"])
+        
+        return business
+    except Exception as e:
+        logger.error(f"Error fetching business by ID: {e}")
+        return None
+
