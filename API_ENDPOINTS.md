@@ -1,403 +1,246 @@
-# Company Search API Endpoints
+# API Endpoints Reference (Frontend)
 
-Complete documentation for the company/business search API built with FastAPI and MongoDB (Motor).
+This document lists all frontend-callable REST endpoints in the repository, what they are used for, the inputs they accept (path/query/body), and the output shapes they return.
 
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-```bash
-# Install dependencies
-pip install motor pandas aiofiles
-
-# Start FastAPI server
-uvicorn app.main:app --reload --port 9000
-```
-
-### Base URL
-```
-http://localhost:9000
-```
+Note: API route prefixes may include `/api/v1` depending on how `app.main` registers routers. Check `app/main.py`.
 
 ---
 
-## 📋 Endpoints Overview
+## 1) Email Enrichment
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/companies` | GET | List/search companies with filters & pagination |
-| `/companies/{id}` | GET | Get single company by ID |
-| `/companies/meta/categories` | GET | Get distinct categories (autocomplete) |
-| `/companies/meta/locations` | GET | Get distinct locations (autocomplete) |
-| `/companies/export/csv` | GET | Export companies to CSV |
-| `/companies/stats/summary` | GET | Get database statistics |
-
----
-
-## 📖 Detailed API Reference
-
-### 1. List/Search Companies
-
-**Endpoint:** `GET /companies`
-
-**Description:** Advanced company search with filtering, sorting, and pagination.
-
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | string | - | Search in business name or category |
-| `location` | string | - | Filter by location/address (regex) |
-| `category` | string | - | Filter by category (regex) |
-| `rating_min` | float | - | Minimum rating (0-5) |
-| `rating_max` | float | - | Maximum rating (0-5) |
-| `has_website` | boolean | - | Filter businesses with/without website |
-| `has_phone` | boolean | - | Filter businesses with/without phone |
-| `services` | array[string] | - | Filter by services (e.g., Dine-in, Delivery) |
-| `sort_by` | string | created_at | Sort field (rating, review_count, created_at, business_name) |
-| `order` | string | desc | Sort order (asc or desc) |
-| `limit` | integer | 20 | Results per page (1-200) |
-| `offset` | integer | 0 | Pagination offset |
-
-**Response Schema:**
+### POST /api/v1/enrichment/companies/{company_id}/enrich-email
+- Purpose: Queue asynchronous email enrichment for a company (SMTP + scraping + WHOIS)
+- Input:
+  - Path parameter: `company_id` (string)
+  - No body required
+- Output (200):
 ```json
 {
-  "total": 1234,
-  "results": [
-    {
-      "_id": "650f5b2a2f1c7f9d4c8b4567",
-      "business_name": "Artisan Coffee Roasters",
-      "address": "123 Main St, Austin, TX 78701",
-      "phone": "(512) 555-0123",
-      "rating": 4.7,
-      "review_count": 342,
-      "category": "Coffee shop",
-      "google_maps_url": "https://www.google.com/maps/place/...",
-      "website": "https://artisancoffee.com",
-      "hours": "Mon-Fri: 7am-8pm",
-      "services": ["Dine-in", "Takeout", "Delivery"],
-      "location": "Austin, TX",
-      "created_at": "2024-10-01T10:30:00Z"
-    }
-  ]
+  "status": "queued",
+  "task_id": "<celery-task-id>",
+  "message": "Email enrichment queued for company <company_id>"
+}
+```
+- Errors:
+  - 404 if company not found
+  - 400 if company has no website
+  - 500 if queuing fails
+
+
+### GET /api/v1/enrichment/companies/{company_id}/emails
+- Purpose: Retrieve enriched emails for a company
+- Input:
+  - Path parameter: `company_id` (string)
+- Output (200):
+```json
+[
+  {
+    "email": "contact@company.com",
+    "verified": true,
+    "confidence": 90,
+    "method": "smtp_verified",
+    "pattern": "contact@{domain}"
+  },
+  {
+    "email": "info@company.com",
+    "verified": true,
+    "confidence": 95,
+    "method": "scraped",
+    "pattern": "found_on_website"
+  }
+]
+```
+- Errors:
+  - 404 if company not found or no enriched emails
+
+
+### GET /api/v1/enrichment/companies/{company_id}/status
+- Purpose: Get enrichment status summary for a company
+- Input:
+  - Path parameter: `company_id` (string)
+- Output (200):
+```json
+{
+  "company_id": "<id>",
+  "has_emails": true,
+  "email_count": 2,
+  "emails": [ ... ],
+  "enriched_at": "2025-10-12T01:19:24Z",
+  "methods_used": ["smtp", "scraping", "whois"]
 }
 ```
 
-**Example Requests:**
 
-```bash
-# Search for coffee shops
-curl "http://localhost:9000/companies?query=coffee&limit=10"
-
-# Filter by location
-curl "http://localhost:9000/companies?location=Austin&limit=20"
-
-# High-rated businesses with website
-curl "http://localhost:9000/companies?rating_min=4.5&has_website=true"
-
-# Combination: coffee shops in Austin, sorted by rating
-curl "http://localhost:9000/companies?query=coffee&location=Austin&sort_by=rating&order=desc"
-
-# Pagination (page 3, 50 per page)
-curl "http://localhost:9000/companies?limit=50&offset=100"
-
-# Filter by multiple services
-curl "http://localhost:9000/companies?services=Dine-in&services=Delivery"
+### POST /api/v1/enrichment/admin/batch-enrich?limit={n}
+- Purpose: Queue batch enrichment for leads missing emails (admin)
+- Input:
+  - Query parameter: `limit` (int, default 100)
+- Output (200):
+```json
+{ "status": "queued", "task_id": "<celery-id>", "message": "Batch enrichment queued for up to <limit> leads" }
 ```
+- Errors:
+  - 400 if limit invalid
+  - 500 on queue failure
 
-**Status Codes:**
-- `200` - Success
-- `400` - Invalid parameters
-- `500` - Server/database error
 
----
-
-### 2. Get Single Company
-
-**Endpoint:** `GET /companies/{company_id}`
-
-**Description:** Retrieve full details of a single company by MongoDB ObjectId.
-
-**Path Parameters:**
-- `company_id` (string, required) - MongoDB ObjectId (24 hex characters)
-
-**Example Request:**
-```bash
-curl "http://localhost:9000/companies/650f5b2a2f1c7f9d4c8b4567"
-```
-
-**Response Schema:**
+### GET /api/v1/enrichment/task/{task_id}/status
+- Purpose: Check Celery task status and result
+- Input:
+  - Path parameter: `task_id` (string)
+- Output (200):
 ```json
 {
-  "_id": "650f5b2a2f1c7f9d4c8b4567",
-  "business_name": "Artisan Coffee Roasters",
-  "address": "123 Main St, Austin, TX 78701",
-  "phone": "(512) 555-0123",
-  "rating": 4.7,
-  "review_count": 342,
-  "category": "Coffee shop",
-  "google_maps_url": "https://www.google.com/maps/place/...",
-  "website": "https://artisancoffee.com",
-  "hours": "Mon-Fri: 7am-8pm, Sat-Sun: 8am-9pm",
-  "services": ["Dine-in", "Takeout", "Delivery"],
-  "location": "Austin, TX",
-  "created_at": "2024-10-01T10:30:00Z"
+  "task_id": "<task_id>",
+  "status": "PENDING|STARTED|SUCCESS|FAILURE|RETRY",
+  "result": { ... }  // present if task finished
 }
 ```
 
-**Status Codes:**
-- `200` - Success
-- `400` - Invalid company ID format
-- `404` - Company not found
-- `500` - Server error
-
 ---
 
-### 3. Get Categories (Autocomplete)
+## 2) Companies / Leads
 
-**Endpoint:** `GET /companies/meta/categories`
-
-**Description:** Get list of distinct categories for dropdown/autocomplete UI.
-
-**Query Parameters:**
-- `limit` (integer, default: 100) - Max categories to return (1-500)
-
-**Example Request:**
-```bash
-curl "http://localhost:9000/companies/meta/categories?limit=50"
+### GET /api/v1/companies
+- Purpose: Search / list businesses
+- Input (query params): (all optional)
+  - `query` (text)
+  - `location` (text)
+  - `category` (text)
+  - `has_phone` (bool)
+  - `has_website` (bool)
+  - `has_email` (bool)
+  - `sort_by` (e.g., score, rating, created_at)
+  - `order` (asc|desc)
+  - `limit` (int), `skip` (int)
+- Output (200):
+```json
+{ "total": 123, "results": [ { "_id":"..", "name":"..", "website":"..", "phone":"..", "lead_score":{...}, "completeness_flags":{...} }, ... ] }
 ```
 
-**Response Schema:**
+
+### GET /api/v1/companies/{id}
+- Purpose: Get normalized company details
+- Input:
+  - Path param `id` (ObjectId string)
+- Output (200):
 ```json
 {
-  "categories": [
-    "Coffee shop",
-    "Restaurant",
-    "Pizza restaurant",
-    "Italian restaurant",
-    "Mexican restaurant",
-    "Bar & grill"
-  ]
+  "_id": "...",
+  "name": "Acme Corp",
+  "website": "https://acme.com",
+  "phone": "+1-555-1234",
+  "emails": [ ... ],
+  "lead_score": { "total_score": 85, "tier": "HOT", "breakdown": {...} },
+  "completeness_flags": { "has_phone": true, "has_email": true },
+  "email_enriched_at": "2025-10-12T01:19:24Z",
 }
 ```
 
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
 
----
-
-### 4. Get Locations (Autocomplete)
-
-**Endpoint:** `GET /companies/meta/locations`
-
-**Description:** Get list of distinct locations for dropdown/autocomplete UI.
-
-**Query Parameters:**
-- `limit` (integer, default: 100) - Max locations to return (1-500)
-
-**Example Request:**
-```bash
-curl "http://localhost:9000/companies/meta/locations?limit=50"
-```
-
-**Response Schema:**
+### GET /api/v1/companies/{id}/score-breakdown
+- Purpose: Get the score breakdown for a single company
+- Input: path param `id`
+- Output:
 ```json
-{
-  "locations": [
-    "Austin, TX",
-    "New York, NY",
-    "San Francisco, CA",
-    "Chicago, IL"
-  ]
-}
+{ "total_score": 85, "tier": "HOT", "breakdown": { "completeness": 40, "reputation": 25, ... }, "missing_fields": ["hours"], "recommendations": ["Add phone number"] }
 ```
 
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
+
+### GET /api/v1/companies/meta/categories
+- Purpose: Get list of categories
+- Output: `['Restaurant','Plumber', ...]`
+
+### GET /api/v1/companies/meta/locations
+- Purpose: Get list of locations
+- Output: `['New York, NY','Miami, FL', ...]`
+
+
+### GET /api/v1/companies/export/csv?{filters}
+- Purpose: Export filtered businesses as CSV
+- Input: same filters as search
+- Output: CSV file stream (Content-Type: text/csv)
 
 ---
 
-### 5. Export to CSV
+## 3) Analytics
 
-**Endpoint:** `GET /companies/export/csv`
+### GET /api/v1/analytics/top_leads?category={}&location={}&limit={}
+- Purpose: Return top leads by lead_score
+- Input: `category`, `location`, `limit`
+- Output: list of lead objects sorted by score
 
-**Description:** Export companies to CSV file with same filtering as list endpoint. Streams results for memory efficiency.
+### GET /api/v1/analytics/counts
+- Purpose: Counts grouped by category+location
+- Output: `[ { category, location, count }, ... ]`
 
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `query` | string | - | Search in business name or category |
-| `location` | string | - | Filter by location |
-| `category` | string | - | Filter by category |
-| `rating_min` | float | - | Minimum rating (0-5) |
-| `has_website` | boolean | - | Filter businesses with website |
-| `limit` | integer | 1000 | Max records to export (1-20000) |
-
-**Example Requests:**
-
-```bash
-# Export all coffee shops
-curl -o coffee_shops.csv "http://localhost:9000/companies/export/csv?query=coffee&limit=500"
-
-# Export high-rated Austin businesses
-curl -o austin_top_rated.csv "http://localhost:9000/companies/export/csv?location=Austin&rating_min=4.5"
-
-# Export businesses with websites
-curl -o with_websites.csv "http://localhost:9000/companies/export/csv?has_website=true&limit=5000"
-```
-
-**Response:**
-- Content-Type: `text/csv`
-- Content-Disposition: `attachment; filename=companies_export_<query>.csv`
-- Streaming response (no memory buffer)
-
-**CSV Format:**
-```csv
-_id,business_name,address,phone,rating,review_count,category,google_maps_url,website,hours,services,location,created_at
-"650f5b2a...",Artisan Coffee,"123 Main St","(512) 555-0123",4.7,342,"Coffee shop","https://...","https://...","Mon-Fri: 7am-8pm","Dine-in|Takeout|Delivery","Austin, TX","2024-10-01T10:30:00Z"
-```
-
-**Notes:**
-- Lists (e.g., services) are joined with `|` separator
-- Quotes and commas are properly escaped
-- Large exports may take time (use reasonable limits)
-
-**Status Codes:**
-- `200` - Success (file download starts)
-- `500` - Export failed
+### GET /api/v1/analytics/summary
+- Purpose: Overall aggregates (avg rating, avg lead score, totals)
+- Output: `{ avg_rating: num, avg_lead_score: num, total_leads: num, complete_leads: num }
 
 ---
 
-### 6. Database Statistics
+## 4) Lead Scoring (if present)
 
-**Endpoint:** `GET /companies/stats/summary`
+### GET /api/v1/scoring/companies/{company_id}/score-breakdown
+- Purpose: Return score breakdown (similar to companies/{id}/score-breakdown)
 
-**Description:** Get aggregate statistics about the database.
-
-**Example Request:**
-```bash
-curl "http://localhost:9000/companies/stats/summary"
-```
-
-**Response Schema:**
-```json
-{
-  "total_companies": 15234,
-  "with_website": 8945,
-  "with_phone": 12456,
-  "website_percentage": 58.73,
-  "phone_percentage": 81.77,
-  "avg_rating": 4.23,
-  "max_rating": 5.0,
-  "min_rating": 1.5,
-  "total_categories": 87,
-  "total_locations": 342
-}
-```
-
-**Status Codes:**
-- `200` - Success
-- `500` - Server error
+### POST /api/v1/scoring/admin/rescore-all
+- Purpose: Trigger background rescore job (Celery)
+- Output: { status: 'queued', task_id }
 
 ---
 
-## 🔐 Security & Rate Limiting
+## 5) Scraping / Crawl
 
-### Recommended Production Setup
+### POST /api/v1/scrape/crawlee
+- Purpose: Trigger crawlee scraping job (Google Maps)
+- Input: body: { query, location, max_results, headless, proxies }
+- Output: { status: 'queued', task_id }
 
-1. **Rate Limiting** (use nginx or FastAPI middleware):
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-
-@router.get("/")
-@limiter.limit("100/minute")
-async def list_companies(...):
-    ...
-```
-
-2. **CORS** (restrict to your frontend domain):
-```python
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],
-    allow_methods=["GET"],
-    allow_headers=["*"],
-)
-```
-
-3. **API Authentication** (for export endpoint):
-```python
-from fastapi.security import APIKeyHeader
-
-api_key_header = APIKeyHeader(name="X-API-Key")
-
-@router.get("/export/csv")
-async def export_csv(api_key: str = Depends(api_key_header)):
-    if api_key != os.getenv("API_KEY"):
-        raise HTTPException(401, "Invalid API key")
-    ...
-```
+### GET /api/v1/scrape/crawlee/task/{task_id}
+- Purpose: Get scrape job status and stats
+- Output: { task_id, status, stats: { total_attempted, success, captcha_encounters } }
 
 ---
 
-## 🎨 Frontend Integration Examples
+## 6) Admin
 
-### React Component Example
+### POST /api/v1/admin/deduplicate
+- Purpose: Trigger deduplication job
+- Input: {threshold, batch_size}
+- Output: {status: 'queued', task_id}
 
-```jsx
-import React, { useState, useEffect } from 'react';
+### GET /api/v1/admin/duplicate-report
+- Purpose: Get last dedupe report
+- Output: { merged_count, duplicates_found, report_url }
 
-function CompanySearch() {
-  const [companies, setCompanies] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+---
 
-  const searchCompanies = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        query: query,
-        limit: 20,
-        offset: 0,
-        sort_by: 'rating',
-        order: 'desc'
-      });
-      
-      const response = await fetch(`http://localhost:9000/companies?${params}`);
-      const data = await response.json();
-      
-      setCompanies(data.results);
-      setTotal(data.total);
-    } catch (error) {
-      console.error('Search failed:', error);
-    }
-    setLoading(false);
-  };
+## 7) Misc
 
-  return (
-    <div>
-      <input 
-        type="text" 
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search companies..."
-      />
-      <button onClick={searchCompanies}>Search</button>
-      
-      {loading && <p>Loading...</p>}
-      
-      <p>Found {total} companies</p>
-      
+### GET /health or GET /api/v1/health
+- Purpose: Liveness
+- Output: `{ status: 'ok' }`
+
+### GET /version
+- Purpose: App version
+- Output: `{ version: '1.0.0', commit: '...' }`
+
+---
+
+## Usage Notes for Frontend
+- Trigger enrichment via POST, then poll `/enrichment/task/{task_id}/status` until `SUCCESS` and then GET `/companies/{id}/emails`.
+- Use `/companies` for search and `/companies/{id}` for details.
+- Dashboards: use `/analytics/*` endpoints.
+
+---
+
+If you want, I can now:
+- generate example fetch() calls for these endpoints, or
+- create an OpenAPI snippet with the request/response schemas.
+Which would you like next?
+
       <table>
         <thead>
           <tr>
