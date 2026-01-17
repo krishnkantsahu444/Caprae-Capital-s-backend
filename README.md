@@ -1,3 +1,275 @@
+# Caprae Capital — Lead Generation Backend
+
+> **Note**: This project was developed as part of the **Full Stack Developer Interview Pre-Work** for Caprae Capital Partners. The challenge was to analyze [SaaSQuatch Leads](https://www.saasquatchleads.com/) and create an enhanced lead generation tool within a 5-hour timeframe that demonstrates business understanding, technical sophistication, and user-centric design.
+
+## About This Project
+
+This backend system was built in response to Caprae Capital's AI-Readiness Pre-Screening Challenge, which evaluates candidates on:
+
+- **Business Use Case Understanding** — Demonstrating clear understanding of the lead generation process and identifying high-impact data points for sales outreach
+- **Technical Sophistication** — Efficient data extraction, reliable performance at scale, data quality improvements (deduplication, enrichment, validation)
+- **UX/UI Design** — User-friendly interface with seamless navigation and minimal learning curve
+- **Innovation** — Creative solutions that deliver high-impact results efficiently
+
+### Challenge Overview
+
+The task was to enhance a lead generation scraping tool by developing one or two impactful features within 5 hours. This implementation focused on creating a production-ready backend with:
+
+- Asynchronous scraping pipeline for scalability
+- Anti-bot measures for reliable data collection
+- MongoDB integration for data persistence and deduplication
+- RESTful API for easy integration with existing workflows
+- Comprehensive data normalization and enrichment capabilities
+
+## System Overview
+
+A production-ready backend for Google Maps lead generation and enrichment. It provides a FastAPI HTTP API that schedules asynchronous scraping jobs (Crawlee / Playwright or a mock scraper) via Celery, stores results in MongoDB (Motor), and includes utilities for anti-bot handling, deduplication, and phone normalization.
+
+### Key Capabilities
+
+- Queue and track scraping jobs via HTTP API
+- Production-ready Google Maps scraper (Crawlee / Playwright) and a mock scraper for tests
+- Asynchronous pipeline with Celery + Redis and async MongoDB client (Motor)
+- Anti-bot features: proxy rotation, user-agent rotation, delay/randomization, CAPTCHA detection hooks
+- Data normalization and deduplication (atomic upserts)
+- Full-number leads with complete contact information (phone + website)
+- Comprehensive API with filtering, export (CSV), and statistics
+
+### Tech Stack
+
+- **Python** (3.11+ recommended)
+- **FastAPI** (HTTP API)
+- **Celery** (background tasks) + **Redis** (broker)
+- **Playwright / Crawlee** for scraping
+- **MongoDB (Motor)** for async persistence
+
+---
+
+## Table of Contents
+
+- [About This Project](#about-this-project)
+- [Quick Start](#quick-start-windows)
+- [Configuration](#configuration-important-variables)
+- [Running a Scrape](#running-a-scrape-examples)
+- [API Reference](#api-reference-and-implementation)
+- [Testing](#testing)
+- [Project Layout](#project-layout-high-level)
+- [Contributing](#contributing)
+
+---
+
+## Quick Start (Windows)
+
+1) Create and activate a virtualenv
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1    # PowerShell
+```
+
+2) Install dependencies
+
+```powershell
+pip install -r requirements.txt
+python -m playwright install chromium
+```
+
+3) Create environment file
+
+```powershell
+copy .env.example .env
+# Edit .env to provide MONGO_URI, MONGO_DB_NAME, and any proxy/user-agent paths
+```
+
+4) Start Redis (example using Docker)
+
+```powershell
+docker run -d --name redis -p 6379:6379 redis:latest
+```
+
+5) Start Celery worker and FastAPI
+
+```powershell
+# From repo root
+celery -A app.celery_tasks.tasks worker --loglevel=info
+# In another terminal
+uvicorn app.main:app --reload --port 9000
+```
+
+Open the interactive API docs at http://localhost:9000/docs
+
+---
+
+## Configuration (Important Variables)
+
+Edit `.env` (copied from `.env.example`) to set:
+
+- `MONGO_URI` — MongoDB connection string (default: `mongodb://localhost:27017/`)
+- `MONGO_DB_NAME` — DB name
+- `MONGO_COLLECTION` — collection for leads (default: `businesses`)
+- `REDIS_URL` — Redis broker URL (e.g. `redis://localhost:6379/0`)
+- `PROXY_LIST_PATH` — optional path to `proxies.txt`
+- `USER_AGENTS_PATH` — optional path to `user_agents.txt`
+- `HEADLESS` — run browsers headless (true/false)
+- Various scraper tuning variables: timeouts, delays, max per session (see config files)
+
+---
+
+## Running a Scrape (Examples)
+
+- Mock scraper (fast, useful for smoke tests)
+
+```bash
+POST http://localhost:9000/scrape/async
+Body: {"query":"AI startups"}
+```
+
+- Crawlee / Google Maps scraper (queues a Celery job)
+
+```bash
+POST http://localhost:9000/scrape/google_maps/async
+Body: {"query":"marketing agency","location":"Austin, TX","max_results":40}
+```
+
+Poll job status:
+
+```bash
+GET /scrape/*/task/{task_id}
+```
+
+---
+
+## API Reference and Implementation
+
+- FastAPI app entry: app/main.py
+- Celery tasks: app/celery_tasks/tasks.py
+- Scrapers: app/scrapers and app/crawlers
+- Helpers and utilities: app/utils
+
+---
+
+## Testing
+
+- Unit tests (fast, no network):
+
+```powershell
+pytest tests/test_parsers.py -v
+```
+
+- Run full tests (including integration/smoke): ensure Redis and MongoDB are available and then run:
+
+```powershell
+pytest tests/ -v -s
+```
+
+---
+
+## Project Layout (High Level)
+
+- `app/` — application package
+  - `main.py` — FastAPI app
+  - `celery_tasks/` — Celery task definitions
+  - `scrapers/`, `crawlers/` — scraping implementations
+  - `db_*.py` — MongoDB helpers (sync/async)
+  - `presentation/` — API routers
+  - `schemas/` — pydantic schemas
+  - `utils/` — anti-bot, normalization, config helpers
+- `scripts/` — helper scripts (create_indexes, test_endpoints)
+- `tests/` — unit and integration tests
+
+---
+
+## Helpful Files
+
+- `requirements.txt` — Python dependencies
+- `proxies.txt.example` — proxy list format
+- `user_agents.txt` — user-agent list used by scrapers
+
+---
+
+## Features Developed for the Challenge
+
+### 1. Asynchronous Scraping Architecture
+- **Why**: Scalability and performance are critical for lead generation tools handling high volumes
+- **Implementation**: Celery + Redis for background job processing, allowing multiple concurrent scraping tasks
+- **Business Impact**: Users can queue multiple searches without blocking, dramatically improving throughput
+
+### 2. Anti-Bot Protection Suite
+- **Why**: Reliable data collection requires evading detection and rate limiting
+- **Implementation**: 
+  - Proxy rotation from configurable proxy pool
+  - User-agent randomization
+  - Random delays between requests
+  - CAPTCHA detection hooks
+- **Business Impact**: Higher success rates and more consistent data collection
+
+### 3. MongoDB Integration with Deduplication
+- **Why**: Lead quality depends on data accuracy and avoiding duplicates
+- **Implementation**: 
+  - Atomic upserts to prevent duplicate records
+  - Phone number normalization for better matching
+  - Structured data storage with indexing for fast queries
+- **Business Impact**: Clean, deduplicated lead databases ready for CRM import
+
+### 4. Full-Number Leads Feature
+- **Why**: Contact information completeness directly impacts sales conversion rates
+- **Implementation**: Detail page scraping to extract complete phone numbers and websites
+- **Business Impact**: Higher-quality leads with verified contact information
+
+### 5. RESTful API with Task Tracking
+- **Why**: Easy integration with existing sales workflows and CRM systems
+- **Implementation**: 
+  - FastAPI endpoints for job submission and status polling
+  - CSV export for bulk data operations
+  - Statistics endpoints for monitoring scraping performance
+- **Business Impact**: Seamless integration into existing tech stacks, minimal training required
+
+---
+
+## Notes and Recommendations
+
+- For local development, Docker is the easiest way to run Redis and MongoDB.
+- Use the mock scraper for rapid iteration without consuming scraping resources.
+- When running Crawlee/Playwright in production, configure a proxy pool and follow local laws and site terms-of-service.
+
+---
+
+## About Caprae Capital
+
+[Caprae Capital Partners](https://capraecapital.com) is a private equity firm dedicated to transforming businesses through strategic initiatives, with a focus on AI-readiness and operational excellence. Unlike traditional PE firms that rely heavily on financial engineering, Caprae emphasizes post-acquisition value creation through SaaS (Software as a Service) and MaaS (M&A as a Service) models.
+
+This project demonstrates practical AI solutions for lead generation—a critical component of Caprae's vision to help businesses improve decision-making, streamline operations, and create lasting value.
+
+**Relevant Links**:
+- [SaaSQuatch Leads](https://www.saasquatchleads.com/) — Reference application
+- [Caprae Substack](https://capraecapital.substack.com/) — Company insights and thought leadership
+- [Recruitment Information](https://capraecapital.com/careers)
+
+---
+
+## Contributing
+
+Pull requests are welcome. Please run the test suite and keep changes focused. Add a short description in PRs explaining behavior changes.
+
+---
+
+## License
+
+See [LICENSE.txt](LICENSE.txt) for licensing information.
+
+---
+
+## Contact & Acknowledgments
+
+**Project Author**: Developed as interview pre-work for Caprae Capital Partners  
+**Challenge Duration**: 5 hours (core features)  
+**Submission Contact**: recruiting@capraecapital.com
+
+Special thanks to the Caprae Capital team for providing a challenging and real-world problem that showcases the intersection of business strategy and technical implementation.
+
+---
+
+**Last Updated**: January 18, 2026
 # Caprae Capital Backend - Lead Generation System# Lead Generation Backend## Lead Generation Backend
 
 
